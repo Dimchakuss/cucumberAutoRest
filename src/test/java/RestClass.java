@@ -1,28 +1,31 @@
-import io.restassured.filter.log.ResponseLoggingFilter;
+import io.cucumber.gherkin.internal.com.eclipsesource.json.JsonObject;
+import io.qameta.allure.restassured.AllureRestAssured;
 import io.restassured.http.ContentType;
 import io.restassured.response.Response;
 import io.restassured.specification.RequestSpecification;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.List;
 import io.cucumber.java.ParameterType;
-import io.cucumber.java.ru.Когда;
 import io.cucumber.java.ru.Тогда;
+import io.cucumber.java.ru.И;
 import io.qameta.allure.Allure;
 import org.testng.Assert;
-
 import static io.restassured.RestAssured.given;
 
 public class RestClass {
 
-    private static RequestSpecification requestSpec = given()
+    public static RequestSpecification requestSpec = given()
             .contentType(ContentType.JSON)
             .baseUri("https://demoqa.com")
             .log().all()
-            .filter(new ResponseLoggingFilter());
-    private static RequestSpecification requestSpecWithBody = given()
+            .filter(new AllureRestAssured());
+    public static RequestSpecification requestSpecWithBody = given()
             .contentType(ContentType.JSON)
             .baseUri("https://demoqa.com")
             .log().body()
-            .filter(new ResponseLoggingFilter());
+            .filter(new AllureRestAssured());
 
     @ParameterType(".*")
     public String StringFromFeatures(String value) {
@@ -37,99 +40,116 @@ public class RestClass {
         return Double.parseDouble(value);
     }
 
-    public static String userName = "user";
-    public static String password = "Pa$$w0rd";
-    public static String tokenFromStep;
-    public static String userIdFromStep;
-    public static List<String> isbnBookNamesFromCatalogFromStep;
+    ThreadLocal<JsonObject> jsonBodyThreadLocal = new ThreadLocal<>();
+    ThreadLocal<String> authToken = new ThreadLocal();
+    ThreadLocal<String> userId = new ThreadLocal();
+    ThreadLocal<List> bookNamesFromCatalog = new ThreadLocal();
+    ThreadLocal<List> isbnBookNamesFromCatalog = new ThreadLocal();
+    ThreadLocal<Response> responseJsonThreadLocal = new ThreadLocal<>();
 
-
-    @Когда("Пользователь вводит логин {StringFromFeatures}, пароль {StringFromFeatures} получает авторизационный токен")
-    public void getTokenStep(String userName, String password) {
-        String token = getToken(userName, password);
-        System.out.println("Полученный токен: " + token);
-        Allure.step(String.format("%s: ожидаем %s \n фактически %s", "Токены", token, token));
+    @Тогда("Запрашиваем userId для выбранной УЗ")
+    public void getUserIdStep() {
+        userId.set(getUserId(jsonBodyThreadLocal.get()));
+        System.out.println("ID авторизованного пользователя: " + userId.get());
+        Allure.step(String.format("%s: ожидаем %s \n фактически %s", "userId", userId.get(), userId.get()));
     }
-    @Тогда("Запрашиваем userId для УЗ логин {StringFromFeatures}, пароль {StringFromFeatures}")
-    public void getUserIdStep(String userName, String password) {
-        String userId = getUserId(userName, password);
-        System.out.println("ID авторизованного пользователя: " + userId);
-        userIdFromStep = userId;
-        Allure.step(String.format("%s: ожидаем %s \n фактически %s", "userId", userIdFromStep, userIdFromStep));
-    }
-    @Тогда("Запрашиваем данные пользователя {StringFromFeatures}")
-    public void getUserInfoStep(String userTypeinfo) {
-        String nameAuthorizedUser = getUserInfo(userIdFromStep, tokenFromStep, userTypeinfo);
-        System.out.println("Авторизованный пользователь: " + nameAuthorizedUser);
-        Allure.step(String.format("%s: ожидаем %s \n фактически %s", userTypeinfo, nameAuthorizedUser, nameAuthorizedUser));
+    @Тогда("Запрашиваем данные пользователя")
+    public void getUserInfoStep() {
+        responseJsonThreadLocal.set(getUserInfo(userId.get(), authToken.get()));
     }
     @Тогда("Запрашиваем все наименования книг в каталоге")
     public void getBooksNamesFromCatalogStep() {
-        List<String> titleBooksNamesFromCatalog = getBooksNamesFromCatalog();
-        System.out.println("Наименования книг в каталоге: " + titleBooksNamesFromCatalog);
-        Allure.step(String.format("%s: ожидаем %s \n фактически %s", "Книги", titleBooksNamesFromCatalog, titleBooksNamesFromCatalog));
+        bookNamesFromCatalog.set(getNameBooksFromCatalog());
+        System.out.println("Наименования книг в каталоге: " + bookNamesFromCatalog.get());
+        Allure.step(String.format("%s: ожидаем %s \n фактически %s", "Книги", bookNamesFromCatalog.get(), bookNamesFromCatalog.get()));
+    }
+    @Тогда("Запрашиваем данные всех книг в каталоге")
+    public void getDataAboutBooksFromCatalogStep() {
+        responseJsonThreadLocal.set(getDataAboutBooksFromCatalog());
     }
     @Тогда("Запрашиваем все ID ISBN книг в каталоге")
     public void getIsbnNamesFromCatalogStep() {
-        List<String> isbnBookNamesFromCatalog = getIsbnNamesFromCatalog();
-        System.out.println("ID книг в каталоге: " + isbnBookNamesFromCatalog);
-        isbnBookNamesFromCatalogFromStep = isbnBookNamesFromCatalog;
-        Allure.step(String.format("%s: ожидаем %s \n фактически %s", "ISBN", isbnBookNamesFromCatalogFromStep, isbnBookNamesFromCatalogFromStep));
+        isbnBookNamesFromCatalog.set(getIsbnBooksFromCatalog());
+        System.out.println("ID книг в каталоге: " + isbnBookNamesFromCatalog.get());
+        Allure.step(String.format("%s: ожидаем %s \n фактически %s", "ISBN", isbnBookNamesFromCatalog.get(), isbnBookNamesFromCatalog.get()));
     }
-    @Тогда("Запрашиваем автора книги с индексом {int}")
-    public void getAuthorByIsbnStep(int index) {
-        String authorsByIsbn = getAuthorByIsbn(isbnBookNamesFromCatalogFromStep.get(index));
-        System.out.println("Автор книги с ID (" + isbnBookNamesFromCatalogFromStep.get(index) + "): " + authorsByIsbn);
-        Allure.step(String.format("%s: ожидаем %s \n фактически %s", "Автор книги", authorsByIsbn, authorsByIsbn));
+    @Тогда("Подготавливаем запрос с телом")
+    public void setRequestWithBodyStep() throws IOException {
+        jsonBodyThreadLocal.set(JsonObject.readFrom(Files.readString(Paths.get("src/test/resources/JSON/requestBody.json"))));
+    }
+    @И("Устанавливает значение {StringFromFeatures} в {StringFromFeatures}")
+    public void setAttributesInJsonBodyStep(String field, String valueOfField) {
+        JsonObject jsonElement = jsonBodyThreadLocal.get();
+        jsonElement.set(field, valueOfField);
+    }
+    @Тогда("Отправляем подготовленный запрос для получения токена")
+    public void sendRequestToGetTokenStep() {
+        authToken.set(getToken(jsonBodyThreadLocal.get()));
+    }
+    @Тогда("Отправляем подготовленный запрос для получения userID")
+    public void sendRequestToGetUserIdStep() {
+        userId.set(getUserId(jsonBodyThreadLocal.get()));
+    }
+    @Тогда("Отправляем подготовленный запрос для получения данных книги с индексом {int}")
+    public void sendRequestStep(int index) {
+        responseJsonThreadLocal.set(getDataAboutBookByIndex(isbnBookNamesFromCatalog.get().get(index).toString()));
+    }
+    @Тогда("Проверяем, что в ответе строковое поле {StringFromFeatures} равно {StringFromFeatures}")
+    public void assertStringStep(String field, String expectedValue) {
+        String result = responseJsonThreadLocal.get().jsonPath().getString(field);
+        Assert.assertEquals(result, expectedValue, "Результат не соответствует ожидаемому");
+        Allure.step(String.format("%s: ожидаем %s \n фактически %s", field, result, expectedValue));
+    }
+    @Тогда("Проверяем, что в ответе числовое поле {StringFromFeatures} равно {int}")
+    public void assertIntStep(String field, int expectedValue) {
+        int result = responseJsonThreadLocal.get().jsonPath().getInt(field);
+        Assert.assertEquals(result, expectedValue, "Результат не соответствует ожидаемому");
+        Allure.step(String.format("%s: ожидаем %s \n фактически %s", field, result, expectedValue));
     }
 
     public static void main(String[] args) {
+        // Место для написания новых степов и их изолированного тестирования
+    }
 
-        // Блок кода для написания новых степов и их изолированного тестирования
-
-        List<String> isbnBookNamesFromCatalog = getIsbnNamesFromCatalog();
-        System.out.println("ID книг в каталоге: " + isbnBookNamesFromCatalog);
-        isbnBookNamesFromCatalogFromStep = isbnBookNamesFromCatalog;
-
-        String authorsByIsbn = getAuthorByIsbn(isbnBookNamesFromCatalogFromStep.get(1));
-        System.out.println("Автор книги с ID (" + isbnBookNamesFromCatalogFromStep.get(1) + "): " + authorsByIsbn);
-
+    public static String getToken(JsonObject jsonBody) {
+        return requestSpecWithBody
+                .body(jsonBody.toString())
+                .post("/Account/v1/GenerateToken")
+                .jsonPath()
+                .getString("token");
     }
-    public static String getToken(String userName, String password) {
-        Response response = requestSpecWithBody
-                .body("{\"userName\": \"" + userName + "\", \"password\": \"" + password + "\"}")
-                .post("/Account/v1/GenerateToken");
-        return response.jsonPath().getString("token");
+    public static String getUserId(JsonObject jsonBody) {
+        return requestSpecWithBody
+                .body(jsonBody.toString())
+                .post( "/Account/v1/Login")
+                .jsonPath()
+                .getString("userId");
     }
-    public static String getUserId(String userName, String password) {
-        Response response = requestSpecWithBody
-                .body("{\"userName\": \"" + userName + "\", \"password\": \"" + password + "\"}")
-                .post( "/Account/v1/Login");
-        return response.jsonPath().getString("userId");
+    public static Response getUserInfo(String userId, String token) {
+        return requestSpec
+                .header("Authorization", "Bearer " + token)
+                .get("/Account/v1/User/" + userId);
     }
-    public static String getUserInfo(String userId, String token, String typeInfo) {
-        requestSpec.header("Authorization", "Bearer " + token);
-        Response response = requestSpec.get("/Account/v1/User/" + userId);
-        return response.jsonPath().getString(""+ typeInfo +"");
+    public static List<String> getNameBooksFromCatalog() {
+        return requestSpec
+                .get("/BookStore/v1/Books")
+                .jsonPath()
+                .getList("books.title");
     }
-    public static List<String> getBooksNamesFromCatalog() {
-        Response response = requestSpec.get("/BookStore/v1/Books");
-        return response.jsonPath().getList("books.title");
+    public static Response getDataAboutBooksFromCatalog() {
+        return requestSpec.get("/BookStore/v1/Books");
     }
-    public static List<String> getIsbnNamesFromCatalog() {
-        Response response = requestSpec.get("/BookStore/v1/Books");
-        return response.jsonPath().getList("books.isbn");
+    public static List<String> getIsbnBooksFromCatalog() {
+        return requestSpec
+                .get("/BookStore/v1/Books")
+                .jsonPath()
+                .getList("books.isbn");
     }
-    public static String getAuthorByIsbn(String isbn) {
+    public static Response getDataAboutBookByIndex(String isbn) {
         RequestSpecification localSpec = given()
                 .baseUri("https://demoqa.com")
                 .log().all()
-                .filter(new ResponseLoggingFilter());
-
-        Response response = localSpec
-                .param("ISBN", isbn)
-                .get("/BookStore/v1/Book");
-
-        return response.jsonPath().getString("author");
+                .filter(new AllureRestAssured());
+        return localSpec.param("ISBN", isbn).get("/BookStore/v1/Book");
     }
 }
